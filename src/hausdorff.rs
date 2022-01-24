@@ -1,0 +1,19 @@
+use geo::prelude::HaversineDistance;
+use geo::Point;
+
+pub fn similarity(trj_a: &[[f64; 3]], trj_b: &[[f64; 3]]) -> f64 {
+    let mut infima_a = vec![f64::NAN; trj_a.len()];
+    let mut infima_b = vec![f64::NAN; trj_b.len()];
+    for i in 0..trj_a.len() {
+        for j in 0..trj_b.len() {
+            let a = Point::from([trj_a[i][0], trj_a[i][1]]);
+            let b = Point::from([trj_b[j][0], trj_b[j][1]]);
+            let dist = a.haversine_distance(&b);
+            infima_a[i] = infima_a[i].min(dist);
+            infima_b[j] = infima_b[j].min(dist);
+        }
+    }
+    let sup_inf_a: f64 = infima_a.iter().fold(f64::NAN, |acc, val| acc.max(*val));
+    let sup_inf_b: f64 = infima_b.iter().fold(f64::NAN, |acc, val| acc.max(*val));
+    sup_inf_a.max(sup_inf_b)
+}
