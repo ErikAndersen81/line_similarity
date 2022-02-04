@@ -1,49 +1,33 @@
-use geo::coords_iter::CoordsIter;
-use geo::prelude::HaversineDistance;
-use geo::LineString;
-use geo::Point;
+use crate::euclidean_distance;
 
 pub fn similarity(trj_a: &[[f64; 3]], trj_b: &[[f64; 3]]) -> f64 {
     // Note: Trajectories must be trimmed before calling
     assert!(trj_a.len() > 1);
     assert!(trj_b.len() > 1);
-    let trj_a = trj_a
-        .iter()
-        .map(|p| Point::<f64>::from((p[0], p[1])))
-        .collect::<Vec<Point<f64>>>();
-    let trj_b: Vec<Point<f64>> = trj_b
-        .iter()
-        .rev()
-        .map(|p| Point::<f64>::from((p[0], p[1])))
-        .collect();
-    let trj_a = LineString::from(trj_a);
-    let trj_b = LineString::from(trj_b);
+    let trj_a: Vec<[f64; 2]> = trj_a.iter().map(|[x, y, _]| [*x, *y]).collect();
+    let trj_b: Vec<[f64; 2]> = trj_b.iter().map(|[x, y, _]| [*x, *y]).collect();
     frechet_distance(&trj_a, &trj_b)
 }
 
-fn frechet_distance(ls_a: &LineString<f64>, ls_b: &LineString<f64>) -> f64 {
-    if ls_a.coords_count() != 0 && ls_b.coords_count() != 0 {
-        let mut data = Data {
-            cache: vec![vec![f64::NAN; ls_b.coords_count()]; ls_a.coords_count()],
-            ls_a,
-            ls_b,
-        };
-        data.compute(ls_a.coords_count() - 1, ls_b.coords_count() - 1)
-    } else {
-        0.0
-    }
+fn frechet_distance(ls_a: &[[f64; 2]], ls_b: &[[f64; 2]]) -> f64 {
+    let mut data = Data {
+        cache: vec![vec![f64::NAN; ls_b.len()]; ls_a.len()],
+        ls_a,
+        ls_b,
+    };
+    data.compute(ls_a.len() - 1, ls_b.len() - 1)
 }
 
 struct Data<'a> {
     cache: Vec<Vec<f64>>,
-    ls_a: &'a LineString<f64>,
-    ls_b: &'a LineString<f64>,
+    ls_a: &'a [[f64; 2]],
+    ls_b: &'a [[f64; 2]],
 }
 
 impl<'a> Data<'a> {
     fn compute(&mut self, i: usize, j: usize) -> f64 {
         if self.cache[i][j].is_nan() {
-            let dist = Point::from(self.ls_a[i]).haversine_distance(&Point::from(self.ls_b[j]));
+            let dist = euclidean_distance(&self.ls_a[i], &self.ls_b[j]);
             self.cache[i][j] = match (i, j) {
                 (0, 0) => dist,
                 (_, 0) => self.compute(i - 1, 0).max(dist),
