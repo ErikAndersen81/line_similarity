@@ -1,4 +1,4 @@
-use geo::{prelude::HaversineDistance, Point};
+use crate::euclidean_distance;
 
 pub fn similarity(trj_a: &[[f64; 3]], trj_b: &[[f64; 3]]) -> f64 {
     let timestamps: Vec<f64> = get_timestamps(trj_a, trj_b);
@@ -64,11 +64,5 @@ fn horizontal_euclidean(p1: &[f64; 3], p2: &[f64; 3], q1: &[f64; 3], q2: &[f64; 
     let p_x = p1[0] + (p2[0] - p1[0]) * delta_t;
     let q_y = q1[1] + (q2[1] - q1[1]) * delta_t;
     let p_y = p1[1] + (p2[1] - p1[1]) * delta_t;
-    real_dist(&[q_x, q_y], &[p_x, p_y])
-}
-
-pub fn real_dist(a: &[f64; 2], b: &[f64; 2]) -> f64 {
-    let p1 = Point::<f64>::from((a[1], a[0]));
-    let p2 = Point::<f64>::from((b[1], b[0]));
-    p1.haversine_distance(&p2)
+    euclidean_distance(&[q_x, q_y], &[p_x, p_y])
 }
