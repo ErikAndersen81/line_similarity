@@ -6,7 +6,7 @@ pub fn similarity(trj_a: &[[f64; 3]], trj_b: &[[f64; 3]]) -> f64 {
     for i in 0..trj_a.len() {
         for j in 0..trj_b.len() {
             let a = [trj_a[i][0], trj_a[i][1]];
-            let b = [trj_b[i][0], trj_b[i][1]];
+            let b = [trj_b[j][0], trj_b[j][1]];
             let dist = euclidean_distance(&a, &b);
             infima_a[i] = infima_a[i].min(dist);
             infima_b[j] = infima_b[j].min(dist);
