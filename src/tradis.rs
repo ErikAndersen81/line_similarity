@@ -22,7 +22,7 @@ pub fn similarity(trj_a: &[[f64; 3]], trj_b: &[[f64; 3]]) -> f64 {
     area_x + area_y
 }
 
-/// Calculate the area of a y-monotone polygon
+/// Calculate the area of a t-monotone polygon
 fn triangulate_area(mut polygon: Vec<[f64; 2]>) -> f64 {
     let mut area = 0.0;
     let mut last_pt = None;
@@ -51,161 +51,84 @@ fn triangulate_area(mut polygon: Vec<[f64; 2]>) -> f64 {
 }
 
 /// Returns a list of y-monotone polygons in the form of adjacency lists.
-fn get_polygons(polyline_a: &[[f64; 2]], polyline_b: &[[f64; 2]]) -> Vec<Vec<[f64; 2]>> {
-    let intersections = get_intersections(polyline_a, polyline_b);
-    // Remove any points from the polylines that are also intersection points.
-    let polyline_a: Vec<[f64; 2]> = polyline_a
-        .iter()
-        .filter(|&p| intersections.iter().all(|&q| !equal(*p, q)))
-        .copied()
-        .collect();
-    let polyline_b: Vec<[f64; 2]> = polyline_b
-        .iter()
-        .filter(|&p| intersections.iter().all(|&q| !equal(*p, q)))
-        .copied()
-        .collect();
-
-    let mut polygon_collection: Vec<Vec<[f64; 2]>> = vec![];
-    #[derive(Copy, Clone)]
-    enum Case {
-        /// Single intersection point at top of polygon
-        Bottom,
-        /// Intersection points at top and bottom of polygon
-        Middle,
-        /// Single intersection point at bottom of polygon
-        Top,
-    }
-    let mut last_case = None;
-    for (idx, intersection) in intersections.iter().enumerate() {
-        if idx + 1 == intersections.len() && intersection[1] > polyline_a[polyline_a.len() - 1][1] {
-            // Special case where the polygon ends with a Case::Middle
-            last_case = Some(Case::Top);
-            continue;
-        }
-        let case: Case = if idx == 0 && intersection[1] > polyline_a[0][1] {
-            Case::Bottom
-        } else if idx + 1 == intersections.len()
-            && intersection[1] < polyline_a[polyline_a.len() - 1][1]
-        {
-            Case::Top
+fn get_polygons(polyline_p: &[[f64; 2]], polyline_q: &[[f64; 2]]) -> Vec<Vec<[f64; 2]>> {
+    let mut polygon_collection = vec![];
+    let mut polygon = vec![];
+    let mut p = 1;
+    let mut q = 1;
+    let mut line_p = Line {
+        start: polyline_p[p - 1],
+        end: polyline_p[p],
+    };
+    let mut line_q = Line {
+        start: polyline_q[q - 1],
+        end: polyline_q[q],
+    };
+    while (p < polyline_p.len()) || (q < polyline_q.len()) {
+        if let Some(ints) = line_p.intersection(&line_q) {
+            // Add final points to the polygon
+            polygon.push(line_p.start);
+            polygon.push(ints);
+            polygon.insert(0, line_q.copy_start());
+            // Adjust adjacency list to start with lowest t-value
+            while polygon[0][1] > polygon[1][1] {
+                let move_to_back = polygon.remove(0);
+                polygon.push(move_to_back);
+            }
+            // Remove any consecutive duplicates
+            polygon.dedup();
+            polygon_collection.push(polygon);
+            // Start building a new polygon
+            polygon = vec![ints];
+            line_p.start = ints;
+            line_q.start = ints;
         } else {
-            Case::Middle
-        };
-        last_case = Some(case);
-        let interval = |case| match case {
-            Case::Bottom => 0.0..intersection[1],
-            Case::Top => intersection[1]..f64::INFINITY,
-            Case::Middle => intersections[idx][1]..intersections[idx + 1][1],
-        };
-        let polygon = match case {
-            Case::Top => {
-                let mut polygon = vec![*intersection];
-                let points_a = polyline_a.iter().filter(|p| interval(case).contains(&p[1]));
-                polygon.extend(points_a);
-                let points_b = polyline_b
-                    .iter()
-                    .filter(|p| interval(case).contains(&p[1]))
-                    .rev();
-                polygon.extend(points_b);
-                polygon
+            if line_p.is_lower_than(&line_q) {
+                polygon.push(line_p.start);
+                p += 1;
+                if p < polyline_p.len() {
+                    line_p.advance(&polyline_p[p]);
+                }
+            } else if line_q.is_lower_than(&line_p) {
+                polygon.insert(0, line_q.start);
+                q += 1;
+                if q < polyline_q.len() {
+                    line_q.advance(&polyline_q[q]);
+                }
+            } else {
+                // both line segments ends at the same t-value, so we
+                // can surely advance both. We could have done this
+                // using non-exclusive if's but this is more readable.
+                polygon.push(line_p.start);
+                polygon.insert(0, line_q.start);
+                p += 1;
+                q += 1;
+                if p < polyline_p.len() {
+                    line_p.advance(&polyline_p[p]);
+                }
+                if q < polyline_q.len() {
+                    line_q.advance(&polyline_q[q]);
+                }
             }
-            Case::Middle => {
-                let mut polygon = vec![*intersection];
-                let points_a = polyline_a.iter().filter(|p| interval(case).contains(&p[1]));
-                polygon.extend(points_a);
-                polygon.push(intersections[idx + 1]);
-                let points_b = polyline_b
-                    .iter()
-                    .filter(|p| interval(case).contains(&p[1]))
-                    .rev();
-                polygon.extend(points_b);
-                polygon
-            }
-            Case::Bottom => {
-                let mut polygon = polyline_a
-                    .iter()
-                    .filter(|p| interval(case).contains(&p[1]))
-                    .copied()
-                    .collect::<Vec<[f64; 2]>>();
-                polygon.push(*intersection);
-                let points_b = polyline_b
-                    .iter()
-                    .filter(|p| interval(case).contains(&p[1]))
-                    .rev();
-                polygon.extend(points_b);
-                polygon
-            }
-        };
+        }
+    }
+    // Add final points to the polygon
+    polygon.push(line_p.start);
+    polygon.push(line_p.end);
+    polygon.insert(0, line_q.copy_start());
+    polygon.insert(0, line_q.copy_end());
+    // Adjust adjacency list to start with lowest t-value
+    while polygon[0][1] > polygon[1][1] {
+        let move_to_back = polygon.remove(0);
+        polygon.push(move_to_back);
+    }
+    // Remove any consecutive duplicates
+    polygon.dedup();
+    // Check for the odd case where trajectories end at an intersection point
+    if polygon.len() > 1 {
         polygon_collection.push(polygon);
     }
-    if let Some(case) = last_case {
-        match case {
-            Case::Middle | Case::Bottom => {
-                // Construct the final polygon
-                let intersection = intersections[intersections.len() - 1];
-                let mut polygon = vec![intersection];
-                let points_a = polyline_a.iter().filter(|p| intersection[1] < p[1]);
-                polygon.extend(points_a);
-                let points_b = polyline_b.iter().filter(|p| intersection[1] < p[1]).rev();
-                polygon.extend(points_b);
-                polygon_collection.push(polygon);
-            }
-            _ => {}
-        }
-    }
     polygon_collection
-}
-
-fn get_intersections(polyline_a: &[[f64; 2]], polyline_b: &[[f64; 2]]) -> Vec<[f64; 2]> {
-    let mut intersections: Vec<[f64; 2]> = vec![];
-    let mut i: usize = 1;
-    let mut j: usize = 1;
-    let mut line_a: Line = Line {
-        start: polyline_a[i - 1],
-        end: polyline_a[i],
-    };
-    let mut line_b: Line = Line {
-        start: polyline_b[j - 1],
-        end: polyline_b[j],
-    };
-    while (i < polyline_a.len()) || (j < polyline_b.len()) {
-        if let Some(intersection_point) = line_a.intersection(&line_b) {
-            if intersections.is_empty()
-                || !equal(intersection_point, intersections[intersections.len() - 1])
-            {
-                // Handle the special case where intersection points are coincidental with polyline points
-                intersections.push(intersection_point);
-            }
-        }
-        // Advance line with lowest y-value on end-coordinate
-        if line_a.end[1] < line_b.end[1] {
-            i += 1;
-            if i < polyline_a.len() {
-                line_a.advance(&polyline_a[i]);
-            }
-        } else if line_b.end[1] < line_a.end[1] {
-            j += 1;
-            if j < polyline_b.len() {
-                line_b.advance(&polyline_b[j]);
-            }
-        } else {
-            // Advance line with highest y-value on start-coordinate
-            j += 1;
-            i += 1;
-            if j < polyline_b.len() {
-                line_b.advance(&polyline_b[j]);
-            }
-            if i < polyline_a.len() {
-                line_a.advance(&polyline_a[i]);
-            }
-        }
-    }
-    intersections
-}
-
-/// Determine if two 2D-points are similar within epsilon 0.00000001
-fn equal(p: [f64; 2], q: [f64; 2]) -> bool {
-    (p[0] - q[0]).abs() + (p[1] - q[1]).abs() < 0.00000001
 }
 
 fn calc_area(p: &[f64; 2], q: &[f64; 2], r: &[f64; 2]) -> f64 {
@@ -218,7 +141,13 @@ struct Line {
 }
 
 impl Line {
-    fn intersection(&self, other: &Line) -> Option<[f64; 2]> {
+    fn intersection(&self, other: &Self) -> Option<[f64; 2]> {
+        #[allow(clippy::float_cmp)]
+        if (self.start[0] == other.start[0]) && (self.start[1] == other.start[1]) {
+            // Special case where the lines start at the same point does not
+            // count as an intersection.
+            return None;
+        }
         let (x1, y1, x2, y2) = (self.start[0], self.start[1], self.end[0], self.end[1]);
         let (x3, y3, x4, y4) = (other.start[0], other.start[1], other.end[0], other.end[1]);
         let denom: f64 = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
@@ -235,6 +164,17 @@ impl Line {
     fn advance(&mut self, next: &[f64; 2]) {
         self.start = self.end;
         self.end = *next;
+    }
+
+    fn is_lower_than(&self, other: &Self) -> bool {
+        self.start[1] < other.start[1]
+    }
+
+    fn copy_start(&self) -> [f64; 2] {
+        self.start
+    }
+    fn copy_end(&self) -> [f64; 2] {
+        self.end
     }
 }
 
@@ -260,7 +200,7 @@ mod tradis_test {
     fn intersect_at_points_on_polyline() {
         let polyline_a = vec![[0., 0.], [1., 1.], [0., 2.]];
         let polyline_b = vec![[0., 0.], [-1., 1.], [0., 2.]];
-        let expected_intersections = vec![[0., 0.], [0., 2.]];
+        let expected_intersections = vec![[0., 2.]];
         let intersections = get_intersections(&polyline_a, &polyline_b);
         println!("intersections: {:?}", intersections);
         println!("expected: {:?}", expected_intersections);
@@ -290,7 +230,7 @@ mod tradis_test {
     fn diamond_intersect() {
         let polyline_a = vec![[0., 0.], [1., 1.], [0., 2.], [1., 3.], [0., 4.]];
         let polyline_b = vec![[0., 0.], [-1., 1.], [0., 2.], [-1., 3.], [0., 4.]];
-        let expected_intersections = vec![[0., 0.], [0., 2.], [0., 4.]];
+        let expected_intersections = vec![[0., 2.], [0., 4.]];
         let intersections = get_intersections(&polyline_a, &polyline_b);
         println!("intersections: {:?}", intersections);
         println!("expected: {:?}", expected_intersections);
@@ -305,7 +245,7 @@ mod tradis_test {
     fn cross_polygon() {
         let polyline_a = vec![[0., 0.], [2., 2.]];
         let polyline_b = vec![[2., 0.], [0., 2.]];
-        let expected_poly_1 = vec![[0.0, 0.0], [1.0, 1.0], [2.0, 0.0]];
+        let expected_poly_1 = vec![[2.0, 0.0], [0.0, 0.0], [1.0, 1.0]];
         let expected_poly_2 = vec![[1.0, 1.0], [2.0, 2.0], [0.0, 2.0]];
         let polygons = get_polygons(&polyline_a, &polyline_b);
         assert_eq!(polygons.len(), 2);
