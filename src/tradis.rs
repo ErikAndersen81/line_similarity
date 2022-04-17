@@ -12,42 +12,14 @@ pub fn similarity(trj_a: &[[f64; 3]], trj_b: &[[f64; 3]]) -> f64 {
     let trj_bx: Vec<[f64; 2]> = trj_b.iter().map(|p| [p[0], p[2]]).collect();
     let trj_by: Vec<[f64; 2]> = trj_b.iter().map(|p| [p[1], p[2]]).collect();
     let area_x: f64 = get_polygons(&trj_ax, &trj_bx)
-        .iter()
-        .map(|polygon| triangulate_area(polygon.to_vec()))
+        .iter_mut()
+        .map(|polygon| polygon.area())
         .sum();
     let area_y: f64 = get_polygons(&trj_ay, &trj_by)
-        .iter()
-        .map(|polygon| triangulate_area(polygon.to_vec()))
+        .iter_mut()
+        .map(|polygon| polygon.area())
         .sum();
     area_x + area_y
-}
-
-/// Calculate the area of a t-monotone polygon
-fn triangulate_area(mut polygon: Vec<[f64; 2]>) -> f64 {
-    let mut area = 0.0;
-    let mut last_pt = None;
-    let mut left = polygon.remove(0);
-    let mut right = polygon.pop().unwrap();
-    while polygon.len() > 1 {
-        let last = polygon.len() - 1;
-        if polygon[0][1] < polygon[last][1] {
-            last_pt = Some(left);
-            left = polygon.remove(0);
-        } else if polygon[last][1] < polygon[0][1] {
-            last_pt = Some(right);
-            right = polygon.pop().unwrap();
-        } else if polygon[0][0] < polygon[last][0] {
-            last_pt = Some(left);
-            left = polygon.remove(0);
-        } else if polygon[last][0] < polygon[0][0] {
-            last_pt = Some(right);
-            right = polygon.pop().unwrap();
-        }
-        if let Some(last_pt) = last_pt {
-            area += calc_area(&left, &right, &last_pt);
-        }
-    }
-    area
 }
 
 /// Returns a list of y-monotone polygons in the form of adjacency lists.
@@ -69,14 +41,8 @@ fn get_polygons(polyline_p: &[[f64; 2]], polyline_q: &[[f64; 2]]) -> Vec<Vec<[f6
             // Add final points to the polygon
             polygon.push(line_p.start);
             polygon.push(ints);
-            polygon.insert(0, line_q.copy_start());
-            // Adjust adjacency list to start with lowest t-value
-            while polygon[0][1] > polygon[1][1] {
-                let move_to_back = polygon.remove(0);
-                polygon.push(move_to_back);
-            }
-            // Remove any consecutive duplicates
-            polygon.dedup();
+            polygon.push_q(line_q.start);
+            polygon.finalize();
             polygon_collection.push(polygon);
             // Start building a new polygon
             polygon = vec![ints];
@@ -90,7 +56,7 @@ fn get_polygons(polyline_p: &[[f64; 2]], polyline_q: &[[f64; 2]]) -> Vec<Vec<[f6
                     line_p.advance(&polyline_p[p]);
                 }
             } else if line_q.is_lower_than(&line_p) {
-                polygon.insert(0, line_q.start);
+                polygon.push_q(line_q.start);
                 q += 1;
                 if q < polyline_q.len() {
                     line_q.advance(&polyline_q[q]);
@@ -100,7 +66,7 @@ fn get_polygons(polyline_p: &[[f64; 2]], polyline_q: &[[f64; 2]]) -> Vec<Vec<[f6
                 // can surely advance both. We could have done this
                 // using non-exclusive if's but this is more readable.
                 polygon.push(line_p.start);
-                polygon.insert(0, line_q.start);
+                polygon.push_q(line_q.start);
                 p += 1;
                 q += 1;
                 if p < polyline_p.len() {
@@ -113,22 +79,71 @@ fn get_polygons(polyline_p: &[[f64; 2]], polyline_q: &[[f64; 2]]) -> Vec<Vec<[f6
         }
     }
     // Add final points to the polygon
-    polygon.push(line_p.start);
-    polygon.push(line_p.end);
-    polygon.insert(0, line_q.copy_start());
-    polygon.insert(0, line_q.copy_end());
-    // Adjust adjacency list to start with lowest t-value
-    while polygon[0][1] > polygon[1][1] {
-        let move_to_back = polygon.remove(0);
-        polygon.push(move_to_back);
-    }
-    // Remove any consecutive duplicates
-    polygon.dedup();
+    polygon.push_p(line_p.start);
+    polygon.push_p(line_p.end);
+    polygon.push_q(line_q.start);
+    polygon.push_q(line_q.end);
+    polygon.finalize();
     // Check for the odd case where trajectories end at an intersection point
     if polygon.len() > 1 {
         polygon_collection.push(polygon);
     }
     polygon_collection
+}
+
+trait Polygon {
+    fn finalize(&mut self);
+    fn push_p(&mut self, p: [f64; 2]);
+    fn push_q(&mut self, q: [f64; 2]);
+    fn area(&mut self) -> f64;
+}
+
+impl Polygon for Vec<[f64; 2]> {
+    fn finalize(&mut self) {
+        // Adjust adjacency list to start with lowest t-value
+        while self[0][1] > self[1][1] {
+            let move_to_back = self.remove(0);
+            self.push(move_to_back);
+        }
+        // Remove any consecutive duplicates
+        self.dedup();
+    }
+
+    fn push_p(&mut self, p: [f64; 2]) {
+        self.push(p);
+    }
+
+    fn push_q(&mut self, q: [f64; 2]) {
+        self.insert(0, q);
+    }
+
+    /// This method only works when the polygon is monotone on the second axis
+    fn area(&mut self) -> f64 {
+        let mut area = 0.0;
+        let mut last_pt = None;
+        let mut left = self.remove(0);
+        let mut right = self.pop().unwrap();
+        while self.len() > 1 {
+            let last = self.len() - 1;
+            if self[0][1] < self[last][1] {
+                last_pt = Some(left);
+                left = self.remove(0);
+            } else if self[last][1] < self[0][1] {
+                last_pt = Some(right);
+                right = self.pop().unwrap();
+            } else if self[0][0] < self[last][0] {
+                last_pt = Some(left);
+                left = self.remove(0);
+            } else if self[last][0] < self[0][0] {
+                last_pt = Some(right);
+                right = self.pop().unwrap();
+            }
+            if let Some(last_pt) = last_pt {
+                area += calc_area(&left, &right, &last_pt);
+            }
+        }
+        area
+    }
 }
 
 fn calc_area(p: &[f64; 2], q: &[f64; 2], r: &[f64; 2]) -> f64 {
@@ -169,76 +184,14 @@ impl Line {
     fn is_lower_than(&self, other: &Self) -> bool {
         self.start[1] < other.start[1]
     }
-
-    fn copy_start(&self) -> [f64; 2] {
-        self.start
-    }
-    fn copy_end(&self) -> [f64; 2] {
-        self.end
-    }
 }
 
 #[cfg(test)]
 mod tradis_test {
     use super::*;
 
-    #[test]
-    fn intersect_multiple() {
-        let polyline_a = vec![[0., 0.], [2., 2.], [0., 4.], [2., 6.]];
-        let polyline_b = vec![[1., 0.], [1., 6.]];
-        let expected_intersections = vec![[1., 1.], [1., 3.], [1., 5.]];
-        let intersections = get_intersections(&polyline_a, &polyline_b);
-        println!("intersections: {:?}", intersections);
-        println!("expected: {:?}", expected_intersections);
-        intersections
-            .iter()
-            .zip(expected_intersections.iter())
-            .for_each(|(p, q)| assert!(equal(*p, *q)));
-    }
-
-    #[test]
-    fn intersect_at_points_on_polyline() {
-        let polyline_a = vec![[0., 0.], [1., 1.], [0., 2.]];
-        let polyline_b = vec![[0., 0.], [-1., 1.], [0., 2.]];
-        let expected_intersections = vec![[0., 2.]];
-        let intersections = get_intersections(&polyline_a, &polyline_b);
-        println!("intersections: {:?}", intersections);
-        println!("expected: {:?}", expected_intersections);
-        assert_eq!(intersections.len(), expected_intersections.len());
-        intersections
-            .iter()
-            .zip(expected_intersections.iter())
-            .for_each(|(p, q)| assert!(equal(*p, *q)));
-    }
-
-    #[test]
-    fn cross_intersect() {
-        let polyline_a = vec![[0., 0.], [2., 2.]];
-        let polyline_b = vec![[2., 0.], [0., 2.]];
-        let expected_intersections = vec![[1., 1.]];
-        let intersections = get_intersections(&polyline_a, &polyline_b);
-        println!("intersections: {:?}", intersections);
-        println!("expected: {:?}", expected_intersections);
-        assert_eq!(intersections.len(), expected_intersections.len());
-        intersections
-            .iter()
-            .zip(expected_intersections.iter())
-            .for_each(|(p, q)| assert!(equal(*p, *q)));
-    }
-
-    #[test]
-    fn diamond_intersect() {
-        let polyline_a = vec![[0., 0.], [1., 1.], [0., 2.], [1., 3.], [0., 4.]];
-        let polyline_b = vec![[0., 0.], [-1., 1.], [0., 2.], [-1., 3.], [0., 4.]];
-        let expected_intersections = vec![[0., 2.], [0., 4.]];
-        let intersections = get_intersections(&polyline_a, &polyline_b);
-        println!("intersections: {:?}", intersections);
-        println!("expected: {:?}", expected_intersections);
-        assert_eq!(intersections.len(), expected_intersections.len());
-        intersections
-            .iter()
-            .zip(expected_intersections.iter())
-            .for_each(|(p, q)| assert!(equal(*p, *q)));
+    fn equal(p: [f64; 2], q: [f64; 2]) -> bool {
+        ((p[0] - q[0]).abs() + (p[1] - q[1]).abs()) < 0.00001
     }
 
     #[test]
@@ -285,14 +238,14 @@ mod tradis_test {
 
     #[test]
     fn diamonds_trangulate() {
-        let diamond = vec![[0.0, 0.0], [1.0, 1.0], [0.0, 2.0], [-1.0, 1.0]];
-        let area = triangulate_area(diamond);
+        let mut diamond = vec![[0.0, 0.0], [1.0, 1.0], [0.0, 2.0], [-1.0, 1.0]];
+        let area = diamond.area();
         assert!((area - 2.0).abs() > 0.001);
     }
 
     #[test]
     fn jagged_trangulate() {
-        let polygon = vec![
+        let mut polygon = vec![
             [0.0, 0.0],
             [2.0, 1.0],
             [1.0, 2.0],
@@ -301,7 +254,7 @@ mod tradis_test {
             [2.0, 6.0],
             [0.0, 7.0],
         ];
-        let area = triangulate_area(polygon);
+        let area = polygon.area();
         assert!((area - 11.0).abs() > 0.001);
     }
 }
